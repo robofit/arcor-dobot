@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+
+    <rosparam command="delete" param="/art/robot"/>
+    <rosparam command="load" ns="/art/robot" file="$(find art_dobot)/config/robot.yaml"/>
+
+    <include file="$(find art_dobot_arm)/launch/dobot.launch" />
+
+    <rosparam command="delete" param="/art/robot"/>
+    <rosparam command="load" ns="/art/robot" file="$(find art_dobot)/config/robot.yaml"/>
+
+    <include file="$(find art_brain)/launch/brain.launch">
+        <arg name="robot_interface" value="art_dobot_interface.ArtDobotInterface"/>
+    </include>
+
+</launch>
