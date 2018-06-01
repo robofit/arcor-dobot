@@ -53,6 +53,8 @@ class DobotClient(object):
         self._action_name = "arm/pp"
         self._as = actionlib.SimpleActionServer(self._action_name, PickPlaceAction, self.pick_place_cb, True)
 
+        self.grasped_object_pub = rospy.Publisher("arm/grasped_object", ObjInstance, queue_size=1, latch=True)
+
         self.move_to_sub = rospy.Subscriber("arm/move_to", PoseStamped, self.move_to_cb, queue_size=100)
         self.object_sub = rospy.Subscriber("/art/object_detector/object_filtered", InstancesArray, self.objects_cb,
                                            queue_size=1)
@@ -63,6 +65,7 @@ class DobotClient(object):
 
         self._objects = InstancesArray()
         self._grasped_object = ObjInstance()
+        self.grasped_object_pub.publish(self._grasped_object)
         self._init_dobot()
 
         rospy.loginfo("Dobot ready")
@@ -86,14 +89,15 @@ class DobotClient(object):
             self._as.set_succeeded(res)
         elif goal.operation == PickPlaceGoal.PICK_OBJECT_ID:
             res = self.pick_object_id(goal.object)
-            if res.result == res.SUCCESS:
-                self._as.set_succeeded(res)
-            else:
-                self._as.set_aborted(res)
         elif goal.operation == PickPlaceGoal.PLACE_TO_POSE:
-            self.place_object(goal.pose)
+            res = self.place_object(goal.pose)
         elif goal.operation == PickPlaceGoal.GET_READY:
             self.get_ready()
+            res.result = res.SUCCESS
+        if res.result == res.SUCCESS:
+            self._as.set_succeeded(res)
+        else:
+            self._as.set_aborted(res)
 
     def pick_object_id(self, object_id):
         """
@@ -132,6 +136,7 @@ class DobotClient(object):
                 self.wait_for_final_pose(pp.pose)
                 res = PickPlaceResult()
                 res.result = res.SUCCESS
+                self.grasped_object_pub.publish(deepcopy(o))
                 return res
         res = PickPlaceResult()
         res.result = res.FAILURE
@@ -149,17 +154,37 @@ class DobotClient(object):
         Returns:
 
         """
+        print self._grasped_object.object_type
+        print self.get_object_type(self._grasped_object.object_type)
+
         obj_type = self.get_object_type(self._grasped_object.object_type)
         place_pose.pose.position.z = obj_type.bbox.dimensions[obj_type.bbox.BOX_Z]
         #  self.get_ready_for_pick_place()
 
         transformed_pose = self.tf_listener.transformPose("/base_link", place_pose)
-        self.move_to_pose(transformed_pose, 0)
-        self.wait_for_final_pose(transformed_pose.pose)
-        self.set_suction(False)
-        transformed_pose.pose.position.z += 0.03
-        self.move_to_pose(transformed_pose)
-        self.wait_for_final_pose(transformed_pose.pose)
+        try:
+            pp = deepcopy(transformed_pose)
+            pp.pose.position.z = max(pp.pose.position.z + 0.05, 0.15)
+            self.move_to_pose(pp, 1)
+            self.wait_for_final_pose(pp.pose)
+            self.move_to_pose(transformed_pose)
+            self.wait_for_final_pose(transformed_pose.pose)
+            self.set_suction(False)
+            transformed_pose.pose.position.z += 0.03
+            self.move_to_pose(transformed_pose)
+            self.wait_for_final_pose(transformed_pose.pose)
+            self._grasped_object = ObjInstance()
+            self.grasped_object_pub.publish(self._grasped_object)
+            res = PickPlaceResult()
+            res.result = res.SUCCESS
+            return res
+        except TimeoutException:
+            # failed to place object
+            res = PickPlaceResult()
+            res.result = res.FAILURE
+            res.message = "Failed to place the object"
+            return res
+
 
     def wait_for_final_pose(self, pose, timeout=10):
         end_time = rospy.Time.now() + rospy.Duration(timeout)
