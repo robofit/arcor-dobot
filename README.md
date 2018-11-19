@@ -1,3 +1,3 @@
-# artable-dobot
+# arcor-dobot
 
-[![Build Status](https://travis-ci.org/robofit/artable-dobot.svg?branch=master)](https://travis-ci.org/robofit/artable-dobot)
+[![Build Status](https://travis-ci.org/robofit/arcor-dobot.svg?branch=master)](https://travis-ci.org/robofit/arcor-dobot)
