@@ -13,7 +13,8 @@ from dobot.srv import \
     SetPTPJumpParams, SetPTPJumpParamsRequest, SetPTPJumpParamsResponse, \
     SetPTPCommonParams, SetPTPCommonParamsRequest, SetPTPCommonParamsResponse, \
     SetEndEffectorSuctionCup, SetEndEffectorSuctionCupRequest, SetEndEffectorSuctionCupResponse, \
-    GetEndEffectorSuctionCup, GetEndEffectorSuctionCupRequest, GetEndEffectorSuctionCupResponse
+    GetEndEffectorSuctionCup, GetEndEffectorSuctionCupRequest, GetEndEffectorSuctionCupResponse, \
+    ClearAllAlarmsState
 from tf import TransformBroadcaster, TransformListener
 from geometry_msgs.msg import PoseStamped, Pose
 from art_msgs.msg import PickPlaceAction, PickPlaceFeedback, PickPlaceGoal, PickPlaceResult, InstancesArray, \
@@ -49,6 +50,7 @@ class DobotClient(object):
         self.set_ptp_coord_params_srv = rospy.ServiceProxy("/DobotServer/SetPTPCoordinateParams",
                                                            SetPTPCoordinateParams)
         self.set_ptp_jump_params_srv = rospy.ServiceProxy("/DobotServer/SetPTPJumpParams", SetPTPJumpParams)
+        self.clear_all_alarm_state = rospy.ServiceProxy("/DobotServer/ClearAllAlarmsState", ClearAllAlarmsState)
         self.set_ptp_common_params_srv = rospy.ServiceProxy("/DobotServer/SetPTPCommonParams", SetPTPCommonParams)
         self._action_name = "arm/pp"
         self._as = actionlib.SimpleActionServer(self._action_name, PickPlaceAction, self.pick_place_cb, True)
@@ -112,31 +114,39 @@ class DobotClient(object):
         """
 
         for o in self._objects.instances:  # type: ObjInstance
-            if o.object_id == object_id:
-                obj = PoseStamped()
-                obj.pose = o.pose
-                obj.header = self._objects.header
-                obj.header.stamp = rospy.Time(0)
+            try:
+                if o.object_id == object_id:
+                    obj = PoseStamped()
+                    obj.pose = o.pose
+                    obj.header = self._objects.header
+                    obj.header.stamp = rospy.Time(0)
 
-                transformed_obj = self.tf_listener.transformPose("/base_link", obj)
-                pick_pose = transformed_obj.pose
+                    transformed_obj = self.tf_listener.transformPose("/base_link", obj)
+                    pick_pose = transformed_obj.pose
 
-                self._grasped_object = deepcopy(o)
-                obj_type = self.get_object_type(o.object_type)
-                # pick_pose.position.z += obj_type.bbox.dimensions[obj_type.bbox.BOX_Z] - 0.005
-                pick_pose.position.z -= 0.004
-                pp = PoseStamped()
-                pp.pose = pick_pose
-                self.get_ready_for_pick_place()
-                self.move_to_pose(pp, 0)
-                self.wait_for_final_pose(pp.pose)
-                self.set_suction(True)
-                pp.pose.position.z = max(pp.pose.position.z + 0.05, 0.1)
-                self.move_to_pose(pp, 0)
-                self.wait_for_final_pose(pp.pose)
+                    self._grasped_object = deepcopy(o)
+                    obj_type = self.get_object_type(o.object_type)
+                    # pick_pose.position.z += obj_type.bbox.dimensions[obj_type.bbox.BOX_Z] - 0.005
+                    pick_pose.position.z -= 0.004
+                    pp = PoseStamped()
+                    pp.pose = pick_pose
+                    self.get_ready_for_pick_place()
+                    self.move_to_pose(pp, 0)
+                    self.wait_for_final_pose(pp.pose)
+                    self.set_suction(True)
+                    pp.pose.position.z = max(pp.pose.position.z + 0.05, 0.1)
+                    self.move_to_pose(pp, 0)
+                    self.wait_for_final_pose(pp.pose)
+                    res = PickPlaceResult()
+                    res.result = res.SUCCESS
+                    self.grasped_object_pub.publish(deepcopy(o))
+                    return res
+            except TimeoutException:
+                # failed to pick object
+                self.clear_all_alarm_state.call()
                 res = PickPlaceResult()
-                res.result = res.SUCCESS
-                self.grasped_object_pub.publish(deepcopy(o))
+                res.result = res.FAILURE
+                res.message = "Failed to pick the object"
                 return res
         res = PickPlaceResult()
         res.result = res.FAILURE
@@ -180,6 +190,7 @@ class DobotClient(object):
             return res
         except TimeoutException:
             # failed to place object
+            self.clear_all_alarm_state.call()
             res = PickPlaceResult()
             res.result = res.FAILURE
             res.message = "Failed to place the object"
