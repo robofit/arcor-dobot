@@ -5,7 +5,7 @@
 
     <arg name="run_dobot_server" default="true" />
     <arg name="static_calibration" default="true" />
-    <arg name="dobot_port" default="/dev/ttyUSB0" />
+    <arg name="dobot_port" default="/dev/dobot" />
 
     <node pkg="dobot" type="DobotServer" name="dobot_arm_server"
         args="$(arg dobot_port)" if="$(arg run_dobot_server)" respawn="true" />
